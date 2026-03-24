@@ -1,9 +1,8 @@
 streamlit
 librosa
-numpy
-pandas
-plotly
 gTTS
 transformers
 torch
 soundfile
+plotly
+scipy  # Added for Reverb/Convolution
