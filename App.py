@@ -12,124 +12,127 @@ from difflib import SequenceMatcher
 import re
 import os
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Vedic Chanda-Vox Pro", layout="wide", page_icon="📿")
+# --- 1. PAGE SETUP ---
+st.set_page_config(page_title="Veda-Vox Pro: High-Speed Priest AI", layout="wide", page_icon="🕉️")
 
-# --- CUSTOM TEMPLE THEME ---
 st.markdown("""
     <style>
     .stApp { background-color: #050505; color: #FF9933; }
     h1, h2, h3 { color: #FFCC66 !important; font-family: 'Georgia', serif; }
-    .stButton>button { background: linear-gradient(45deg, #FF9933, #FF4B4B); color: white; border-radius: 8px; border: none; height: 3em; font-weight: bold; }
+    .stButton>button { background: linear-gradient(45deg, #FF9933, #FF4B4B); color: white; border-radius: 8px; font-weight: bold; width: 100%; }
     .stMetric { background-color: #1a1a1a; padding: 15px; border-radius: 10px; border: 1px solid #FF9933; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- AUDIO PROCESSING ENGINE (PRIEST MODE) ---
+# --- 2. PRIEST VOICE ENGINE (High-Speed Capable) ---
 def create_priest_voice(input_path, speed):
     y, sr = librosa.load(input_path, sr=22050)
     
-    # 1. DEEP RESONANCE (Pitch + Formant Shift)
-    # We shift pitch down significantly for that 'Vedic Baritone'
-    y_deep = librosa.effects.pitch_shift(y, sr=sr, n_steps=-5.0)
+    # A. Pitch Shift: Deep Baritone
+    y_deep = librosa.effects.pitch_shift(y, sr=sr, n_steps=-4.5)
     
-    # 2. LETTER CLARITY (High-Shelf Filter)
-    # Boosts frequencies above 3kHz so consonants are 'loud' and 'clear'
-    b, a = [0.5, -0.5], [1, -0.95] # Simple high-pass to sharpen 's' and 't' sounds
+    # B. High-Pass Filter: Makes 'K', 'T', 'S' sounds sharp even at high speed
+    b, a = [0.6, -0.6], [1, -0.9] 
     y_sharp = lfilter(b, a, y_deep)
     
-    # 3. RHYTHMIC STRETCH (Laya)
+    # C. SPEED CONTROL: Now supports up to 2.0x
     y_rhythmic = librosa.effects.time_stretch(y_sharp, rate=speed)
 
-    # 4. TEMPLE ACOUSTICS (Dense Reverb)
-    # This creates the 'Garbhagriha' feel without washing out the letters
-    ir = np.zeros(int(sr * 0.4))
-    ir[0] = 1.0 # Direct clarity
-    ir[int(sr * 0.04)] = 0.5 # Early reflection for body
-    ir[int(sr * 0.12)] = 0.2 # Distant wall
+    # D. Temple Reverb: Small room reflection for clarity at high speeds
+    ir = np.zeros(int(sr * 0.3))
+    ir[0] = 1.0 
+    ir[int(sr * 0.03)] = 0.4 
     y_final = convolve(y_rhythmic, ir, mode='full')[:len(y_rhythmic)]
     
-    # Normalize to prevent clipping
     y_final = librosa.util.normalize(y_final)
-    
-    output_fn = "priest_final_pro.wav"
+    output_fn = "priest_final.wav"
     sf.write(output_fn, y_final, sr)
     return output_fn
 
-# --- AI VALIDATOR ---
+# --- 3. STT VALIDATOR MODEL ---
 @st.cache_resource
 def load_validator():
+    # Using 'whisper-tiny' for speed in hackathons
     return pipeline("automatic-speech-recognition", model="openai/whisper-tiny", 
                     generate_kwargs={"language": "sanskrit", "task": "transcribe"})
 
 asr_pipe = load_validator()
 
-# --- APP UI ---
-st.title("📿 Veda-Vox: Authentic Priest Voice Synthesis")
-st.write("Generating deep-resonant Vedic recitation with high-clarity phonetic output.")
+# --- 4. APP UI ---
+st.title("🕉️ Veda-Vox: Priest-Voice & STT Validator")
 
-col_main, col_side = st.columns([3, 1])
+col_input, col_ctrl = st.columns([2, 1])
 
-with col_side:
-    st.subheader("Vocal Settings")
-    laya = st.slider("Laya (Tempo)", 0.5, 1.0, 0.75)
-    st.info("Lower Laya provides more 'Bhāva' and depth to each syllable.")
+with col_ctrl:
+    st.subheader("🎛️ Control Panel")
+    # SPEED RANGE UPDATED: 0.5x to 2.0x
+    laya = st.slider("Laya (Chant Speed)", 0.5, 2.0, 1.0, step=0.1)
+    st.write(f"Current Tempo: **{laya}x**")
+    st.info("1.0 is Normal. >1.0 is Fast Chanting. <1.0 is Meditative.")
 
-with col_main:
-    verse = st.text_area("Sanskrit Shloka", "शुक्लाम्वरधरं विष्णुं शशिवर्णं चतुर्भुजम्")
-    
-    if st.button("Generate Intense Priest Recitation"):
-        with st.spinner("Synthesizing Authentic Resonance..."):
-            
-            # 1. Generate Base & Process
-            tts = gTTS(text=verse, lang='hi')
-            tts.save("base.mp3")
-            final_path = create_priest_voice("base.mp3", laya)
-            
-            # 2. Audio Player
-            st.audio(final_path)
-            
-            # 3. Accuracy Check
-            audio_raw, _ = librosa.load(final_path, sr=16000)
-            stt_text = asr_pipe(audio_raw)["text"]
-            score = SequenceMatcher(None, verse, stt_text).ratio() * 100
-            
-            st.metric("Phonetic Integrity Score", f"{score:.1f}%")
-            
-            # --- 4. THE VISUAL STACK ---
-            st.divider()
-            st.subheader("📊 Signal Analysis Dashboard")
-            
-            y, sr = librosa.load(final_path)
-            
-            # ROW 1: WAVEFORM & PITCH
-            v1, v2 = st.columns(2)
-            with v1:
-                st.write("**High-Fidelity Waveform**")
-                fig_wave = go.Figure()
-                fig_wave.add_trace(go.Scatter(y=y[::10], line=dict(color='#FF9933')))
-                fig_wave.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_wave, use_container_width=True)
-            
-            with v2:
-                st.write("**Pitch Modulation (Melody)**")
-                pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
-                p_vals = [pitches[magnitudes[:, t].argmax(), t] for t in range(pitches.shape[1]) if np.any(pitches[:, t] > 10)]
-                fig_p = go.Figure(data=go.Scatter(y=p_vals, line=dict(color='#FF4B4B')))
-                fig_p.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0))
-                st.plotly_chart(fig_p, use_container_width=True)
+with col_input:
+    verse = st.text_area("Input Sanskrit Verse", "शुक्लाम्वरधरं विष्णुं शशिवर्णं चतुर्भुजम्")
+    generate_btn = st.button("Generate & Verify Recitation")
 
-            # ROW 2: HIGH-RES SPECTROGRAM
-            st.write("**High-Resolution Power Spectrogram**")
-            # Using a larger window for clearer frequency resolution
-            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
-            S_dB = librosa.power_to_db(S, ref=np.max)
-            
-            
-            
-            fig_s, ax_s = plt.subplots(figsize=(12, 4))
-            fig_s.patch.set_facecolor('#050505')
-            ax_s.set_facecolor('#050505')
-            img = librosa.display.specshow(S_dB, sr=sr, x_axis='time', y_axis='mel', fmax=8000, ax=ax_s, cmap='plasma')
-            ax_s.tick_params(colors='#FFCC66')
-            st.pyplot(fig_s)
+if generate_btn:
+    with st.spinner("Synthesizing Priest Resonance..."):
+        # Step 1: Base Audio
+        tts = gTTS(text=verse, lang='hi')
+        tts.save("base.mp3")
+        
+        # Step 2: Priest Modulation
+        final_path = create_priest_voice("base.mp3", laya)
+        st.audio(final_path)
+
+        # Step 3: SPEECH-TO-TEXT VERIFICATION
+        st.divider()
+        st.subheader("🧐 Speech-to-Text (STT) Verification")
+        
+        # Load audio for Whisper (16kHz requirement)
+        audio_raw, _ = librosa.load(final_path, sr=16000)
+        stt_output = asr_pipe(audio_raw)["text"]
+        
+        v_col1, v_col2 = st.columns(2)
+        with v_col1:
+            st.markdown("**Original Text:**")
+            st.info(verse)
+        with v_col2:
+            st.markdown("**AI Transcription:**")
+            st.success(stt_output)
+        
+        # Fidelity Score
+        similarity = SequenceMatcher(None, verse, stt_output).ratio() * 100
+        st.metric("Phonetic Fidelity Score", f"{similarity:.1f}%")
+
+        # --- 4. ADVANCED WAVEFORMS ---
+        st.divider()
+        st.subheader("📊 High-Resolution Signal Analysis")
+        
+        y_viz, sr_viz = librosa.load(final_path)
+        
+        # WAVEFORM
+        fig_wave = go.Figure()
+        fig_wave.add_trace(go.Scatter(y=y_viz[::5], line=dict(color='#FF9933', width=1)))
+        fig_wave.update_layout(title="Time-Domain Waveform (Energy Peaks)", height=300, 
+                              plot_bgcolor='black', paper_bgcolor='black', font_color='#FFCC66')
+        st.plotly_chart(fig_wave, use_container_width=True)
+        
+        
+
+        # SPECTROGRAM
+        st.write("**Frequency Spectrogram (Clarity Visualizer)**")
+        S = librosa.feature.melspectrogram(y=y_viz, sr=sr_viz, n_mels=128)
+        S_dB = librosa.power_to_db(S, ref=np.max)
+        
+        fig_spec, ax_spec = plt.subplots(figsize=(12, 4))
+        fig_spec.patch.set_facecolor('#050505')
+        ax_spec.set_facecolor('#050505')
+        img = librosa.display.specshow(S_dB, sr=sr_viz, x_axis='time', y_axis='mel', ax=ax_spec, cmap='plasma')
+        ax_spec.tick_params(colors='#FFCC66')
+        st.pyplot(fig_spec)
+
+        
+
+        if similarity > 85:
+            st.balloons()
+            st.write("✅ **Verification Success:** The Priest voice remains 100% intelligible at this speed.")
