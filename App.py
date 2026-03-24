@@ -7,73 +7,56 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from gtts import gTTS
 from transformers import pipeline
-from scipy.signal import convolve
+from scipy.signal import convolve, lfilter
 from difflib import SequenceMatcher
 import re
 import os
 
-# 1. PAGE CONFIG & CUSTOM THEME (Temple Aesthetic)
-st.set_page_config(page_title="Chanda-Vox Priest AI", layout="wide", page_icon="🕉️")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Vedic Chanda-Vox Pro", layout="wide", page_icon="📿")
 
+# --- CUSTOM TEMPLE THEME ---
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0e1117;
-        color: #FF9933;
-    }
-    h1, h2, h3 {
-        color: #FFCC66 !important;
-    }
-    .stButton>button {
-        background-color: #FF9933;
-        color: black;
-        border-radius: 10px;
-        font-weight: bold;
-        width: 100%;
-    }
-    .stTextArea textarea {
-        background-color: #1c1c1c !important;
-        color: #FFCC66 !important;
-    }
+    .stApp { background-color: #050505; color: #FF9933; }
+    h1, h2, h3 { color: #FFCC66 !important; font-family: 'Georgia', serif; }
+    .stButton>button { background: linear-gradient(45deg, #FF9933, #FF4B4B); color: white; border-radius: 8px; border: none; height: 3em; font-weight: bold; }
+    .stMetric { background-color: #1a1a1a; padding: 15px; border-radius: 10px; border: 1px solid #FF9933; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. PROSODY LOGIC (Syllabic Weighting)
-def get_syllable_metrics(text):
-    guru_indicators = "आईऊएऐओऔाीूेैोौंः"
-    tokens = re.findall(r'[क-ह]्?[अ-औा-ौ]?[ंः]?', text)
-    weights = []
-    for i in range(len(tokens)):
-        char = tokens[i]
-        next_char = tokens[i+1] if i+1 < len(tokens) else ""
-        if any(c in char for c in guru_indicators) or "्" in next_char:
-            weights.append(2)
-        else:
-            weights.append(1)
-    return weights, tokens
-
-# 3. PRIEST VOICE MODULATION ENGINE
-def apply_priest_fx(input_path, laya_speed):
+# --- AUDIO PROCESSING ENGINE (PRIEST MODE) ---
+def create_priest_voice(input_path, speed):
     y, sr = librosa.load(input_path, sr=22050)
     
-    # A. Pitch Shift: Move to a deep, resonant Baritone
-    y_deep = librosa.effects.pitch_shift(y, sr=sr, n_steps=-4.5)
+    # 1. DEEP RESONANCE (Pitch + Formant Shift)
+    # We shift pitch down significantly for that 'Vedic Baritone'
+    y_deep = librosa.effects.pitch_shift(y, sr=sr, n_steps=-5.0)
     
-    # B. Speed: Apply rhythmic Laya
-    y_rhythmic = librosa.effects.time_stretch(y_deep, rate=laya_speed)
+    # 2. LETTER CLARITY (High-Shelf Filter)
+    # Boosts frequencies above 3kHz so consonants are 'loud' and 'clear'
+    b, a = [0.5, -0.5], [1, -0.95] # Simple high-pass to sharpen 's' and 't' sounds
+    y_sharp = lfilter(b, a, y_deep)
+    
+    # 3. RHYTHMIC STRETCH (Laya)
+    y_rhythmic = librosa.effects.time_stretch(y_sharp, rate=speed)
 
-    # C. Temple Reverb: Synthetic Impulse Response (Garbhagriha Acoustics)
-    ir = np.zeros(int(sr * 0.6))
-    ir[0] = 1.0 # Direct Sound
-    ir[int(sr * 0.08)] = 0.5 # Stone wall reflection 1
-    ir[int(sr * 0.18)] = 0.3 # Reflection 2
+    # 4. TEMPLE ACOUSTICS (Dense Reverb)
+    # This creates the 'Garbhagriha' feel without washing out the letters
+    ir = np.zeros(int(sr * 0.4))
+    ir[0] = 1.0 # Direct clarity
+    ir[int(sr * 0.04)] = 0.5 # Early reflection for body
+    ir[int(sr * 0.12)] = 0.2 # Distant wall
     y_final = convolve(y_rhythmic, ir, mode='full')[:len(y_rhythmic)]
     
-    output_fn = "priest_final.wav"
+    # Normalize to prevent clipping
+    y_final = librosa.util.normalize(y_final)
+    
+    output_fn = "priest_final_pro.wav"
     sf.write(output_fn, y_final, sr)
     return output_fn
 
-# 4. LOAD STT MODEL (For Proof of Clarity)
+# --- AI VALIDATOR ---
 @st.cache_resource
 def load_validator():
     return pipeline("automatic-speech-recognition", model="openai/whisper-tiny", 
@@ -81,73 +64,72 @@ def load_validator():
 
 asr_pipe = load_validator()
 
-# 5. UI LAYOUT
-st.title("🕉️ Chanda-Vox: High-Fidelity Priest AI")
-st.write("Generating melodic, rhythmically constrained Sanskrit recitation with phonetic validation.")
+# --- APP UI ---
+st.title("📿 Veda-Vox: Authentic Priest Voice Synthesis")
+st.write("Generating deep-resonant Vedic recitation with high-clarity phonetic output.")
 
-# Sidebar Controls
-st.sidebar.header("🎛️ Modulation Controls")
-laya = st.sidebar.slider("Laya (Chant Speed)", 0.5, 1.2, 0.75)
-st.sidebar.info("Tip: Lower speed mimics slow Vedic chanting.")
+col_main, col_side = st.columns([3, 1])
 
-# Input Section
-input_verse = st.text_area("Enter Sanskrit Verse (Devanagari)", "शुक्लाम्वरधरं विष्णुं शशिवर्णं चतुर्भुजम्")
+with col_side:
+    st.subheader("Vocal Settings")
+    laya = st.slider("Laya (Tempo)", 0.5, 1.0, 0.75)
+    st.info("Lower Laya provides more 'Bhāva' and depth to each syllable.")
 
-if st.button("Generate Melodic Priest Recitation"):
-    with st.spinner("Invoking the Digital Guru..."):
-        
-        # Step A: Base AI Synthesis
-        tts = gTTS(text=input_verse, lang='hi')
-        tts.save("base_ai.mp3")
-        
-        # Step B: Humanize/Priest Modulation
-        weights, tokens = get_syllable_metrics(input_verse)
-        final_audio_path = apply_priest_fx("base_ai.mp3", laya)
-        
-        # Step C: Before and After Comparison
-        st.subheader("🔊 Audio Comparison")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.write("🤖 Standard AI (Robotic)")
-            st.audio("base_ai.mp3")
-        with c2:
-            st.write("🕉️ Priest-Modulated (Human)")
-            st.audio(final_audio_path)
+with col_main:
+    verse = st.text_area("Sanskrit Shloka", "शुक्लाम्वरधरं विष्णुं शशिवर्णं चतुर्भुजम्")
+    
+    if st.button("Generate Intense Priest Recitation"):
+        with st.spinner("Synthesizing Authentic Resonance..."):
+            
+            # 1. Generate Base & Process
+            tts = gTTS(text=verse, lang='hi')
+            tts.save("base.mp3")
+            final_path = create_priest_voice("base.mp3", laya)
+            
+            # 2. Audio Player
+            st.audio(final_path)
+            
+            # 3. Accuracy Check
+            audio_raw, _ = librosa.load(final_path, sr=16000)
+            stt_text = asr_pipe(audio_raw)["text"]
+            score = SequenceMatcher(None, verse, stt_text).ratio() * 100
+            
+            st.metric("Phonetic Integrity Score", f"{score:.1f}%")
+            
+            # --- 4. THE VISUAL STACK ---
+            st.divider()
+            st.subheader("📊 Signal Analysis Dashboard")
+            
+            y, sr = librosa.load(final_path)
+            
+            # ROW 1: WAVEFORM & PITCH
+            v1, v2 = st.columns(2)
+            with v1:
+                st.write("**High-Fidelity Waveform**")
+                fig_wave = go.Figure()
+                fig_wave.add_trace(go.Scatter(y=y[::10], line=dict(color='#FF9933')))
+                fig_wave.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0), plot_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig_wave, use_container_width=True)
+            
+            with v2:
+                st.write("**Pitch Modulation (Melody)**")
+                pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+                p_vals = [pitches[magnitudes[:, t].argmax(), t] for t in range(pitches.shape[1]) if np.any(pitches[:, t] > 10)]
+                fig_p = go.Figure(data=go.Scatter(y=p_vals, line=dict(color='#FF4B4B')))
+                fig_p.update_layout(height=250, margin=dict(l=0, r=0, t=0, b=0))
+                st.plotly_chart(fig_p, use_container_width=True)
 
-        # Step D: STT Back-Conversion (The Proof)
-        st.divider()
-        st.subheader("🧐 Phonetic Accuracy Check")
-        audio_check, _ = librosa.load(final_audio_path, sr=16000)
-        stt_result = asr_pipe(audio_check)["text"]
-        
-        val_c1, val_c2 = st.columns(2)
-        val_c1.info(f"**Original Input:**\n{input_verse}")
-        val_c2.success(f"**AI Transcribed:**\n{stt_result}")
-        
-        score = SequenceMatcher(None, input_verse, stt_result).ratio() * 100
-        st.metric("Transcription Accuracy", f"{score:.1f}%")
-
-        # Step E: Scientific Visualizations
-        st.divider()
-        st.subheader("📈 Signal Visualizations")
-        v1, v2 = st.columns(2)
-
-        with v1:
-            st.write("**Melodic Pitch Contour**")
-            y_v, sr_v = librosa.load(final_audio_path)
-            pitches, magnitudes = librosa.piptrack(y=y_v, sr=sr_v)
-            pitch_vals = [pitches[magnitudes[:, t].argmax(), t] for t in range(pitches.shape[1]) if np.any(pitches[:, t] > 0)]
-            fig_p = go.Figure(data=go.Scatter(y=pitch_vals, line=dict(color='#FF9933', width=2)))
-            st.plotly_chart(fig_p, use_container_width=True)
-
-        with v2:
-            st.write("**Power Spectrogram (Harmonics)**")
-            D = librosa.amplitude_to_db(np.abs(librosa.stft(y_v)), ref=np.max)
-            fig_s, ax_s = plt.subplots(figsize=(10, 5))
-            fig_s.patch.set_facecolor('#0e1117')
-            ax_s.set_facecolor('#0e1117')
-            img = librosa.display.specshow(D, sr=sr_v, x_axis='time', y_axis='log', ax=ax_s, cmap='magma')
+            # ROW 2: HIGH-RES SPECTROGRAM
+            st.write("**High-Resolution Power Spectrogram**")
+            # Using a larger window for clearer frequency resolution
+            S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
+            S_dB = librosa.power_to_db(S, ref=np.max)
+            
+            
+            
+            fig_s, ax_s = plt.subplots(figsize=(12, 4))
+            fig_s.patch.set_facecolor('#050505')
+            ax_s.set_facecolor('#050505')
+            img = librosa.display.specshow(S_dB, sr=sr, x_axis='time', y_axis='mel', fmax=8000, ax=ax_s, cmap='plasma')
+            ax_s.tick_params(colors='#FFCC66')
             st.pyplot(fig_s)
-
-        # Cleanup
-        if os.path.exists("base_ai.mp3"): os.remove("base_ai.mp3")
