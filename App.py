@@ -13,55 +13,54 @@ import re
 import os
 import io
 
-# --- 1. THEME & UI ---
-st.set_page_config(page_title="Veda-Vox: Melodic Prosody", layout="wide", page_icon="🕉️")
+# --- 1. UI & THEME ---
+st.set_page_config(page_title="Veda-Vox Continuous", layout="wide")
 st.markdown("<style>.stApp { background-color: #0b0e14; color: #ff9933; }</style>", unsafe_allow_html=True)
 
-# --- 2. CHANDAS ENGINE ---
-def analyze_metrics(text):
-    # Matches syllables (Aksharas) like 'ॐ', 'न', 'मः', 'शि'
-    tokens = re.findall(r'[क-ह]्?[अ-औा-ौ]?[ंः]?|ॐ', text)
-    weights = []
+# --- 2. CHANDAS MAPPING ---
+def get_rhythm_map(text):
+    # Rule-based weighting for Guru (Long) vs Laghu (Short)
     guru_marks = "आईऊएऐओऔाीूेैोौंः"
-    
-    for i, t in enumerate(tokens):
-        next_t = tokens[i+1] if i+1 < len(tokens) else ""
-        if any(m in t for m in guru_marks) or "्" in next_t or t == "ॐ":
-            weights.append(1.8) # Guru: Long/Melodic
+    # Identify positions of characters
+    weights = []
+    for i, char in enumerate(text):
+        if char in guru_marks or char == "ॐ":
+            weights.append(1.8) # Slow down for melody
         else:
-            weights.append(1.0) # Laghu: Short/Quick
-    return tokens, weights
+            weights.append(1.0) # Normal speed
+    return weights
 
-# --- 3. MELODIC SYNTHESIS ---
-def generate_melodic_voice(tokens, weights, base_speed):
-    full_audio = []
+# --- 3. CONTINUOUS MELODIC SYNTHESIS ---
+def synthesize_continuous_priest(text, base_speed):
     sr = 22050
+    # Generate the WHOLE sentence for natural flow
+    tts = gTTS(text=text, lang='hi')
+    tts.save("full_sentence.mp3")
+    y, _ = librosa.load("full_sentence.mp3", sr=sr)
+
+    # A. MELODIC TRANSFORMATION
+    # -2.5 Pitch shift gives 'Authority' and 'Depth' without losing melody
+    y_melodic = librosa.effects.pitch_shift(y, sr=sr, n_steps=-2.5)
     
-    for token, weight in zip(tokens, weights):
-        tts = gTTS(text=token, lang='hi')
-        temp_fn = f"syl_{token}.mp3"
-        tts.save(temp_fn)
-        
-        y, _ = librosa.load(temp_fn, sr=sr)
-        
-        # A. Melodic Pitch: -2.8 is the "Sweet Spot" for a resonant Priest voice
-        y_mod = librosa.effects.pitch_shift(y, sr=sr, n_steps=-2.8)
-        
-        # B. Rhythmic Laya: Stretching Guru syllables for melody
-        stretch = base_speed / weight
-        y_timed = librosa.effects.time_stretch(y_mod, rate=stretch)
-        
-        # C. Harmonic Saturation: Adds human 'warmth' to the digital signal
-        y_warm = np.tanh(y_timed * 1.4) 
-        
-        full_audio.extend(y_warm)
-        # 15ms micro-pause for distinct letter articulation
-        full_audio.extend(np.zeros(int(sr * 0.015)))
-        
-        if os.path.exists(temp_fn): os.remove(temp_fn)
-        
-    final_y = np.array(full_audio)
-    return librosa.util.normalize(final_y), sr
+    # B. SPECTRAL ENHANCER (Letter Clarity)
+    # This ensures "S", "T", "P" are loud and clear over the deep voice
+    b, a = [1.2, -1.2], [1, -0.95]
+    y_clear = lfilter(b, a, y_melodic)
+
+    # C. CONTINUOUS TIME STRETCH (The Rhythm Pulse)
+    # We apply a single stretch based on the average weight of the verse
+    # to maintain sentence flow while honoring the Chandas
+    weights = get_rhythm_map(text)
+    avg_weight = np.mean(weights) if weights else 1.0
+    effective_speed = base_speed / avg_weight
+    
+    y_final = librosa.effects.time_stretch(y_clear, rate=effective_speed)
+    
+    # D. HARMONIC WARMTH (Saturation)
+    y_final = np.tanh(y_final * 1.5) 
+    
+    if os.path.exists("full_sentence.mp3"): os.remove("full_sentence.mp3")
+    return librosa.util.normalize(y_final), sr
 
 # --- 4. VALIDATOR ---
 @st.cache_resource
@@ -71,65 +70,55 @@ def load_stt():
 
 asr_pipe = load_stt()
 
-# --- 5. UI LAYOUT ---
-st.title("🕉️ Veda-Vox: Syllabic Melodic Synthesis")
-st.write("Generating **Deep Melodic** recitation with **Letter-by-Letter** prosody weighting.")
+# --- 5. UI DISPLAY ---
+st.title("🕉️ Veda-Vox: Continuous Melodic Priest")
+st.write("Synthesizing natural, deep-resonant Sanskrit speech with high-definition letter clarity.")
 
-input_text = st.text_input("Enter Sanskrit Text", "ॐ नमः शिवाय")
-laya = st.slider("Chant Pace (Laya)", 0.5, 2.0, 1.1)
+input_text = st.text_input("Enter Sanskrit Shloka", "ॐ नमः शिवाय")
+laya = st.slider("Chant Speed (Laya)", 0.6, 1.8, 1.0)
 
-if st.button("Synthesize Priest Melody"):
-    tokens, weights = analyze_metrics(input_text)
-    
-    # Show Syllable Analysis
-    st.write("**Syllable Weight Analysis:**")
-    cols = st.columns(len(tokens))
-    for i, (t, w) in enumerate(zip(tokens, weights)):
-        cols[i].info(f"{t}\n({'Guru' if w > 1 else 'Laghu'})")
-
-    with st.spinner("Modulating Vocal Formants..."):
-        y_res, sr_res = generate_melodic_voice(tokens, weights, laya)
+if st.button("Synthesize Full Recitation"):
+    with st.spinner("Processing Melodic Harmonics..."):
+        y_audio, sr_audio = synthesize_continuous_priest(input_text, laya)
         
-        # Buffer for Playback/Download
-        buf = io.BytesIO()
-        sf.write(buf, y_res, sr_res, format='WAV')
-        buf.seek(0)
+        # Audio Storage
+        buffer = io.BytesIO()
+        sf.write(buffer, y_audio, sr_audio, format='WAV')
+        buffer.seek(0)
         
-        st.audio(buf)
-        st.download_button("📥 Download Master Recitation", buf, "priest_melody.wav", "audio/wav")
+        st.subheader("🔊 Priest Recitation")
+        st.audio(buffer)
+        st.download_button("📥 Download WAV", buffer, "priest_recitation.wav", "audio/wav")
 
-    # --- 6. PHONETIC SCORE HIGHLIGHTS ---
+    # --- 6. PHONETIC VALIDATION ---
     st.divider()
-    st.subheader("🧐 Phonetic Score & Validation")
-    y_16 = librosa.resample(y_res, orig_sr=sr_res, target_sr=16000)
-    stt_out = asr_pipe(y_16)["text"]
+    st.subheader("🧐 Speech-to-Text (STT) Verification")
+    y_16k = librosa.resample(y_audio, orig_sr=sr_audio, target_sr=16000)
+    stt_result = asr_pipe(y_16k)["text"]
     
-    # Highlight Logic
-    score = SequenceMatcher(None, input_text.replace(" ", ""), stt_out.replace(" ", "")).ratio() * 100
-    st.metric("Overall Phonetic Fidelity", f"{score:.1f}%")
+    col1, col2 = st.columns(2)
+    col1.metric("Input Verse", input_text)
+    col2.metric("AI Transcription", stt_result)
     
-    st.write("**Transcription Accuracy per Letter:**")
-    # Visually mapping the STT result
-    st.success(f"Synthesized: {input_text}  ➡️  AI Detected: {stt_out}")
-
-    # --- 7. SIGNAL ANALYSIS ---
+    # --- 7. SIGNAL VISUALS ---
     st.divider()
-    st.subheader("📊 High-Definition Signal Analysis")
+    st.subheader("📊 Signal Analysis Dashboard")
     
     # WAVEFORM
     
     fig_w = go.Figure()
-    fig_w.add_trace(go.Scatter(y=y_res[::10], line=dict(color='#ff9933', width=1)))
-    fig_w.update_layout(title="Vocal Energy Waveform", height=300, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
+    fig_w.add_trace(go.Scatter(y=y_audio[::10], line=dict(color='#ff9933', width=1.5)))
+    fig_w.update_layout(title="Continuous Vocal Waveform", height=300, 
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
     st.plotly_chart(fig_w, use_container_width=True)
 
     # SPECTROGRAM
     
-    st.write("**High-Res Harmonics (Spectrogram)**")
-    S = librosa.feature.melspectrogram(y=y_res, sr=sr_res, n_mels=128)
+    st.write("**Letter-Frequency Articulation (Spectrogram)**")
+    S = librosa.feature.melspectrogram(y=y_audio, sr=sr_audio, n_mels=128)
     S_dB = librosa.power_to_db(S, ref=np.max)
     fig_s, ax_s = plt.subplots(figsize=(12, 4))
     fig_s.patch.set_facecolor('#0b0e14')
-    img = librosa.display.specshow(S_dB, sr=sr_res, x_axis='time', y_axis='mel', ax=ax_s, cmap='magma')
+    img = librosa.display.specshow(S_dB, sr=sr_audio, x_axis='time', y_axis='mel', ax=ax_s, cmap='magma')
     ax_s.tick_params(colors='#ffcc66')
     st.pyplot(fig_s)
