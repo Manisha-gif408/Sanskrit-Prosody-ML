@@ -13,13 +13,13 @@ import re
 import os
 import io
 
-# --- 1. PAGE SETUP ---
-st.set_page_config(page_title="Chanda-Vox Precision", layout="wide", page_icon="📿")
-st.markdown("<style>.stApp { background-color: #050505; color: #FF9933; }</style>", unsafe_allow_html=True)
+# --- 1. THEME & UI ---
+st.set_page_config(page_title="Veda-Vox: Melodic Prosody", layout="wide", page_icon="🕉️")
+st.markdown("<style>.stApp { background-color: #0b0e14; color: #ff9933; }</style>", unsafe_allow_html=True)
 
-# --- 2. CHANDAS LOGIC (Letter by Letter) ---
-def analyze_aksharas(text):
-    # Matches individual Sanskrit syllables (Aksharas)
+# --- 2. CHANDAS ENGINE ---
+def analyze_metrics(text):
+    # Matches syllables (Aksharas) like 'ॐ', 'न', 'मः', 'शि'
     tokens = re.findall(r'[क-ह]्?[अ-औा-ौ]?[ंः]?|ॐ', text)
     weights = []
     guru_marks = "आईऊएऐओऔाीूेैोौंः"
@@ -27,46 +27,43 @@ def analyze_aksharas(text):
     for i, t in enumerate(tokens):
         next_t = tokens[i+1] if i+1 < len(tokens) else ""
         if any(m in t for m in guru_marks) or "्" in next_t or t == "ॐ":
-            weights.append(2.0) # Guru: 2x duration
+            weights.append(1.8) # Guru: Long/Melodic
         else:
-            weights.append(1.0) # Laghu: 1x duration
+            weights.append(1.0) # Laghu: Short/Quick
     return tokens, weights
 
-# --- 3. THE PRIEST SYNTHESIZER ---
-def synthesize_priest_chanda(tokens, weights, base_speed):
-    combined_audio = []
+# --- 3. MELODIC SYNTHESIS ---
+def generate_melodic_voice(tokens, weights, base_speed):
+    full_audio = []
     sr = 22050
     
     for token, weight in zip(tokens, weights):
         tts = gTTS(text=token, lang='hi')
-        temp_fn = f"temp_{token}.mp3"
+        temp_fn = f"syl_{token}.mp3"
         tts.save(temp_fn)
         
         y, _ = librosa.load(temp_fn, sr=sr)
         
-        # A. Priest Transformation (Deep Baritone)
-        y_priest = librosa.effects.pitch_shift(y, sr=sr, n_steps=-5.0)
+        # A. Melodic Pitch: -2.8 is the "Sweet Spot" for a resonant Priest voice
+        y_mod = librosa.effects.pitch_shift(y, sr=sr, n_steps=-2.8)
         
-        # B. Letter Clarity Filter (Exciter)
-        b, a = [0.8, -0.8], [1, -0.85]
-        y_priest = lfilter(b, a, y_priest)
+        # B. Rhythmic Laya: Stretching Guru syllables for melody
+        stretch = base_speed / weight
+        y_timed = librosa.effects.time_stretch(y_mod, rate=stretch)
         
-        # C. Rhythmic Duration (Chanda Speed)
-        # Slower for Guru, Faster for Laghu
-        stretch_rate = base_speed / weight
-        y_timed = librosa.effects.time_stretch(y_priest, rate=stretch_rate)
+        # C. Harmonic Saturation: Adds human 'warmth' to the digital signal
+        y_warm = np.tanh(y_timed * 1.4) 
         
-        combined_audio.extend(y_timed)
-        # Minimal gap for clear articulation
-        combined_audio.extend(np.zeros(int(sr * 0.04)))
+        full_audio.extend(y_warm)
+        # 15ms micro-pause for distinct letter articulation
+        full_audio.extend(np.zeros(int(sr * 0.015)))
         
         if os.path.exists(temp_fn): os.remove(temp_fn)
         
-    final_y = np.array(combined_audio)
-    final_y = librosa.util.normalize(final_y)
-    return final_y, sr
+    final_y = np.array(full_audio)
+    return librosa.util.normalize(final_y), sr
 
-# --- 4. AI VALIDATOR ---
+# --- 4. VALIDATOR ---
 @st.cache_resource
 def load_stt():
     return pipeline("automatic-speech-recognition", model="openai/whisper-tiny", 
@@ -74,64 +71,65 @@ def load_stt():
 
 asr_pipe = load_stt()
 
-# --- 5. UI ---
-st.title("📿 Veda-Vox: Precision Priest Synth")
-st.write("Processing: **ॐ नमः शिवाय** | Analyzing metrical weights for each letter.")
+# --- 5. UI LAYOUT ---
+st.title("🕉️ Veda-Vox: Syllabic Melodic Synthesis")
+st.write("Generating **Deep Melodic** recitation with **Letter-by-Letter** prosody weighting.")
 
-input_text = st.text_input("Enter Shloka", "ॐ नमः शिवाय")
-speed_slider = st.slider("Base Laya (Tempo)", 0.5, 2.5, 1.2)
+input_text = st.text_input("Enter Sanskrit Text", "ॐ नमः शिवाय")
+laya = st.slider("Chant Pace (Laya)", 0.5, 2.0, 1.1)
 
-if st.button("Generate & Analyze"):
-    tokens, weights = analyze_aksharas(input_text)
+if st.button("Synthesize Priest Melody"):
+    tokens, weights = analyze_metrics(input_text)
     
-    # Visualizing the Chanda Weights
-    st.write("**Metrical Rhythm Breakdown:**")
+    # Show Syllable Analysis
+    st.write("**Syllable Weight Analysis:**")
     cols = st.columns(len(tokens))
     for i, (t, w) in enumerate(zip(tokens, weights)):
-        cols[i].metric(t, "Guru (Long)" if w==2 else "Laghu (Short)")
+        cols[i].info(f"{t}\n({'Guru' if w > 1 else 'Laghu'})")
 
-    with st.spinner("Synthesizing Aksharas..."):
-        y_final, sr_final = synthesize_priest_chanda(tokens, weights, speed_slider)
+    with st.spinner("Modulating Vocal Formants..."):
+        y_res, sr_res = generate_melodic_voice(tokens, weights, laya)
         
-        # Save to Buffer for Download
-        buffer = io.BytesIO()
-        sf.write(buffer, y_final, sr_final, format='WAV')
-        buffer.seek(0)
+        # Buffer for Playback/Download
+        buf = io.BytesIO()
+        sf.write(buf, y_res, sr_res, format='WAV')
+        buf.seek(0)
         
-        # Audio Player & Download
-        st.audio(buffer, format='audio/wav')
-        st.download_button(label="📥 Download Priest Recitation (.wav)", 
-                          data=buffer, 
-                          file_name="priest_chanda.wav", 
-                          mime="audio/wav")
+        st.audio(buf)
+        st.download_button("📥 Download Master Recitation", buf, "priest_melody.wav", "audio/wav")
 
-    # --- 6. STT VERIFICATION ---
+    # --- 6. PHONETIC SCORE HIGHLIGHTS ---
     st.divider()
-    st.subheader("🧐 Speech-to-Text (STT) Accuracy")
-    # Whisper needs 16kHz
-    y_16k = librosa.resample(y_final, orig_sr=sr_final, target_sr=16000)
-    stt_result = asr_pipe(y_16k)["text"]
+    st.subheader("🧐 Phonetic Score & Validation")
+    y_16 = librosa.resample(y_res, orig_sr=sr_res, target_sr=16000)
+    stt_out = asr_pipe(y_16)["text"]
     
-    c1, c2 = st.columns(2)
-    c1.info(f"**Target:** {input_text}")
-    c2.success(f"**AI Heard:** {stt_result}")
+    # Highlight Logic
+    score = SequenceMatcher(None, input_text.replace(" ", ""), stt_out.replace(" ", "")).ratio() * 100
+    st.metric("Overall Phonetic Fidelity", f"{score:.1f}%")
     
+    st.write("**Transcription Accuracy per Letter:**")
+    # Visually mapping the STT result
+    st.success(f"Synthesized: {input_text}  ➡️  AI Detected: {stt_out}")
+
     # --- 7. SIGNAL ANALYSIS ---
     st.divider()
-    st.subheader("📊 High-Definition Signal Dashboard")
+    st.subheader("📊 High-Definition Signal Analysis")
     
     # WAVEFORM
-    fig_wave = go.Figure()
-    fig_wave.add_trace(go.Scatter(y=y_final[::5], line=dict(color='#FF9933')))
-    fig_wave.update_layout(title="Time-Domain Waveform", paper_bgcolor='black', plot_bgcolor='black', font_color='#FFCC66')
-    st.plotly_chart(fig_wave, use_container_width=True)
+    
+    fig_w = go.Figure()
+    fig_w.add_trace(go.Scatter(y=y_res[::10], line=dict(color='#ff9933', width=1)))
+    fig_w.update_layout(title="Vocal Energy Waveform", height=300, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
+    st.plotly_chart(fig_w, use_container_width=True)
 
     # SPECTROGRAM
-    st.write("**Letter-Frequency Spectrogram**")
-    S = librosa.feature.melspectrogram(y=y_final, sr=sr_final, n_mels=128)
+    
+    st.write("**High-Res Harmonics (Spectrogram)**")
+    S = librosa.feature.melspectrogram(y=y_res, sr=sr_res, n_mels=128)
     S_dB = librosa.power_to_db(S, ref=np.max)
-    fig_spec, ax_spec = plt.subplots(figsize=(12, 4))
-    fig_spec.patch.set_facecolor('#050505')
-    img = librosa.display.specshow(S_dB, sr=sr_final, x_axis='time', y_axis='mel', ax=ax_spec, cmap='plasma')
-    ax_spec.tick_params(colors='#FFCC66')
-    st.pyplot(fig_spec)
+    fig_s, ax_s = plt.subplots(figsize=(12, 4))
+    fig_s.patch.set_facecolor('#0b0e14')
+    img = librosa.display.specshow(S_dB, sr=sr_res, x_axis='time', y_axis='mel', ax=ax_s, cmap='magma')
+    ax_s.tick_params(colors='#ffcc66')
+    st.pyplot(fig_s)
