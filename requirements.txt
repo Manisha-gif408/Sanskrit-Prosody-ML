@@ -1,10 +1,6 @@
 streamlit
-librosa
 numpy
-scipy
-matplotlib
-gTTS
-transformers
-torch
-soundfile
 plotly
+indic-transliteration
+chanda
+scipy
