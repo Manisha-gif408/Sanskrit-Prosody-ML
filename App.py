@@ -76,49 +76,119 @@ asr_pipe = load_stt()
 # --- 4. UI DISPLAY ---
 st.title("🕉️ Veda-Vox: Deep Om & Melodic Shloka")
 st.write("Specialized for **resonant Pranava (Om)** and **musical phonetic clarity**.")
+import streamlit as st
+import numpy as np
+import plotly.graph_objects as go
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
+import time
+import re
 
-input_text = st.text_input("Enter Verse (Start with ॐ for best effect)", "ॐ नमः शिवाय")
-laya = st.slider("Chant Pace", 0.7, 1.5, 1.0)
+# --- CONFIG ---
+st.set_page_config(page_title="NaadBrahma AI", layout="wide", page_icon="🕉️")
 
-if st.button("Generate Sacred Chant"):
-    with st.spinner("Refining Vocal Formants..."):
-        y_audio, sr_audio = synthesize_vedic_chant(input_text, laya)
+# --- PRIEST-VOICE MAPPINGS ---
+RAGA_MAP = {
+    "Bhairav (Early Morning)": [1.0, 1.06, 1.25, 1.33, 1.5, 1.58, 1.87],
+    "Bhairavi (Devotional)": [1.0, 1.06, 1.2, 1.33, 1.5, 1.58, 1.77],
+    "Yaman (Evening/Peace)": [1.0, 1.12, 1.26, 1.42, 1.5, 1.68, 1.89],
+    "Rigveda Monotone (Udatta)": [1.0, 1.0, 1.0, 1.12, 1.0, 1.0, 0.9] # Traditional 3-tone
+}
+
+RASA_MAP = {
+    "Gambhira (Deep/Priestly)": {"attack": 0.3, "vibrato": 1.5, "harmonics": [1, 2, 3, 0.5], "breath": 0.1},
+    "Karuna (Compassionate)": {"attack": 0.5, "vibrato": 4.0, "harmonics": [1, 1.5, 2], "breath": 0.2},
+    "Shanti (Peaceful)": {"attack": 0.4, "vibrato": 1.0, "harmonics": [1, 2], "breath": 0.05},
+    "Veera (Powerful/Rigid)": {"attack": 0.02, "vibrato": 0.5, "harmonics": [1, 2, 3, 4], "breath": 0.0}
+}
+
+# --- CORE LOGIC ---
+def analyze_syllables(text):
+    hk_text = transliterate(text, sanscript.DEVANAGARI, sanscript.HK)
+    clean = re.sub(r'[\s।॥]', '', hk_text)
+    pattern = []
+    vowels = "AIURaeiou"
+    for i, char in enumerate(clean):
+        if char in "aeiou":
+            if i + 1 < len(clean) and clean[i+1] not in vowels + " ": pattern.append("G")
+            else: pattern.append("L")
+        elif char in "AIUReo": pattern.append("G")
+    return pattern if pattern else ["L", "G"]
+
+def generate_recitation(pattern, base_freq, raga_name, rasa_name, speed):
+    sr = 22050
+    audio_full = np.array([])
+    intervals = RAGA_MAP[raga_name]
+    rasa = RASA_MAP[rasa_name]
+    
+    for i, weight in enumerate(pattern):
+        # 2:1 Rhythmic Ratio
+        duration = 0.45 / speed if weight == "L" else 0.9 / speed
+        t = np.linspace(0, duration, int(sr * duration))
         
-        buffer = io.BytesIO()
-        sf.write(buffer, y_audio, sr_audio, format='WAV')
-        buffer.seek(0)
+        # Calculate Frequency from Raga
+        note_idx = i % len(intervals)
+        freq = base_freq * intervals[note_idx]
         
-        st.subheader("🔊 Audio Output")
-        st.audio(buffer)
-        st.download_button("📥 Save Recitation (.wav)", buffer, "vedic_chant.wav", "audio/wav")
+        # Apply Priest-like "Deep" Harmonics (Additive Synthesis)
+        wave = np.zeros_like(t)
+        for h_idx, h_mult in enumerate(rasa['harmonics']):
+            # Amplitude drops as harmonic increases (natural voice physics)
+            amp = 1.0 / (h_idx + 1)
+            wave += amp * np.sin(2 * np.pi * (freq * h_mult) * t)
+        
+        # Add "Vibrato" for human-like chanting
+        vibrato = 1 + (0.01 * np.sin(2 * np.pi * rasa['vibrato'] * t))
+        wave = wave * vibrato
+        
+        # Add "Breath/Noise" for organic texture
+        noise = (np.random.randn(len(t)) * rasa['breath'] * 0.1)
+        wave += noise
 
-    # --- 5. STT VERIFICATION ---
-    st.divider()
-    st.subheader("🧐 Phonetic Accuracy Verification")
-    y_16k = librosa.resample(y_audio, orig_sr=sr_audio, target_sr=16000)
-    stt_result = asr_pipe(y_16k)["text"]
-    
-    col1, col2 = st.columns(2)
-    col1.metric("Target Input", input_text)
-    col2.metric("AI Transcription", stt_result)
+        # Priest Envelope: Smooth fade in/out
+        attack_len = int(len(t) * rasa['attack'])
+        envelope = np.ones_like(t)
+        envelope[:attack_len] = np.linspace(0, 1, attack_len)
+        envelope[-attack_len:] = np.square(np.linspace(1, 0, attack_len)) # Exponential decay
+        
+        note = (wave * envelope * 0.5)
+        audio_full = np.concatenate([audio_full, note, np.zeros(int(sr * 0.03))])
+        
+    return audio_full, sr
 
-    # --- 6. VISUAL ANALYSIS ---
-    st.divider()
-    st.subheader("📊 Melodic Analysis Dashboard")
-    
-    # WAVEFORM
-    fig_w = go.Figure()
-    fig_w.add_trace(go.Scatter(y=y_audio[::10], line=dict(color='#ff9933', width=1)))
-    fig_w.update_layout(title="Vocal Energy (See the deep Om peaks at the start)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
-    st.plotly_chart(fig_w, use_container_width=True)
-    
+# --- UI ---
+st.title("🕉️ NaadBrahma AI")
+st.subheader("Authentic Sanskrit Priest-Voice Synthesizer")
 
-    # SPECTROGRAM
-    st.write("**Frequency Harmonics (Showing Melodic Resonance)**")
-    S = librosa.feature.melspectrogram(y=y_audio, sr=sr_audio, n_mels=128)
-    S_dB = librosa.power_to_db(S, ref=np.max)
-    fig_s, ax_s = plt.subplots(figsize=(12, 4))
-    fig_s.patch.set_facecolor('#0b0e14')
-    img = librosa.display.specshow(S_dB, sr=sr_audio, x_axis='time', y_axis='mel', ax=ax_s, cmap='magma')
-    ax_s.tick_params(colors='#ffcc66')
-    st.pyplot(fig_s)
+c1, c2 = st.columns([1, 1.2])
+
+with c1:
+    st.markdown("### 🖋️ Sacred Text")
+    verse = st.text_area("Verse", "ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् ।", height=100)
+    
+    st.markdown("### 🎚️ Priest Voice Configuration")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        raga_sel = st.selectbox("Melodic Framework", list(RAGA_MAP.keys()))
+        rasa_sel = st.selectbox("Vocal Intensity (Rasa)", list(RASA_MAP.keys()))
+    with col_b:
+        base_hz = st.slider("Voice Depth (Pitch)", 80, 200, 110) # Lower is more 'Priestly'
+        tempo = st.slider("Chant Speed", 0.5, 1.5, 0.8)
+
+with c2:
+    if st.button("✨ GENERATE CHANT", use_container_width=True):
+        pattern = analyze_syllables(verse)
+        audio, sr = generate_recitation(pattern, base_hz, raga_sel, rasa_sel, tempo)
+        
+        st.success(f"Reciting in {rasa_sel} Style...")
+        st.audio(audio, sample_rate=sr)
+        
+        # Show the "Voice Print"
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(y=audio[:2000], line=dict(color='#FF4B4B')))
+        fig.update_layout(title="Acoustic Waveform (Vocal Print)", template="plotly_dark", height=250)
+        st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+st.info("💡 **Pro-Tip:** For the most authentic 'Priest' sound, set the **Voice Depth** to **100Hz - 120Hz** and use **Gambhira** style.")
+
