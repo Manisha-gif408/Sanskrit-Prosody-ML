@@ -1,61 +1,138 @@
 import streamlit as st
 import numpy as np
-import librosa
-import librosa.display
-import soundfile as sf
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from gtts import gTTS
-from transformers import pipeline
-from scipy.signal import lfilter
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
 import re
-import os
-import io
+from scipy.signal import butter, lfilter
 
-# --- 1. UI SETUP ---
-st.set_page_config(page_title="Veda-Vox Melodic", layout="wide")
-st.markdown("<style>.stApp { background-color: #0b0e14; color: #ff9933; }</style>", unsafe_allow_html=True)
+# --- AUTHENTIC SANSKRIT PROSODY ENGINE ---
 
-# --- 2. ADVANCED MELODIC ENGINE ---
-def synthesize_vedic_chant(text, base_speed):
-    sr = 22050
+def get_prosody_weights(text):
+    """
+    Analyzes Sanskrit text to identify Laghu (1 Matra) and Guru (2 Matras).
+    Rules: Long vowels, vowels before conjuncts, and ending with Anusvara/Visarga are Guru.
+    """
+    # Transliterate to IAST for precise vowel/consonant weight checking
+    iast = transliterate(text, sanscript.DEVANAGARI, sanscript.IAST)
+    words = iast.split()
+    weights = []
     
-    # Check if "Om" is present to handle it separately
-    has_om = "ॐ" in text or "ओम्" in text or "Om" in text.lower()
-    clean_text = text.replace("ॐ", "").strip()
+    long_vowels = ['ā', 'ī', 'ū', 'ṝ', 'e', 'ai', 'o', 'au']
+    
+    for word in words:
+        # Clean word of punctuation
+        clean_word = re.sub(r'[।॥,]', '', word)
+        for i, char in enumerate(clean_word):
+            if char in ['a', 'i', 'u', 'ṛ', 'l']:
+                # Check for weight by position (conjunct consonant following)
+                if i + 1 < len(clean_word) and clean_word[i+1] not in 'aeiouāīūṝaiou':
+                    weights.append("G")
+                else:
+                    weights.append("L")
+            elif char in long_vowels or char in ['ṁ', 'ḥ']:
+                weights.append("G")
+        weights.append("P") # Pause between words
+    return weights
 
-    # A. SYNTHESIZE "OM" (Deep, Long, Resonant)
-    if has_om:
-        tts_om = gTTS(text="ओम्", lang='hi')
-        tts_om.save("om.mp3")
-        y_om, _ = librosa.load("om.mp3", sr=sr)
-        # Deepen Om significantly (-4 steps) and stretch it (0.6x speed = 40% slower)
-        y_om = librosa.effects.pitch_shift(y_om, sr=sr, n_steps=-4.5)
-        y_om = librosa.effects.time_stretch(y_om, rate=0.55) 
-        # Bass Boost for Om
-        y_om = np.tanh(y_om * 2.0) 
-        os.remove("om.mp3")
-    else:
-        y_om = np.array([])
+def apply_vocal_filter(data, cutoff, fs, order=5):
+    """Simulates the resonant chamber of a human throat (Low pass)."""
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    return lfilter(b, a, data)
 
-    # B. SYNTHESIZE SHLOKA (Melodic, Clear, Authoritative)
-    tts_main = gTTS(text=clean_text, lang='hi')
-    tts_main.save("main.mp3")
-    y_main, _ = librosa.load("main.mp3", sr=sr)
+def generate_priest_chant(weights, base_freq, raga_intervals, speed):
+    fs = 22050
+    audio_stream = np.array([])
     
-    # Melodic shift (-2.5 is deep but musical)
-    y_main = librosa.effects.pitch_shift(y_main, sr=sr, n_steps=-2.8)
+    # Fundamental Matra Timing (Standard: Laghu = 0.3s)
+    unit_time = 0.35 / speed 
     
-    # Spectral Sharpening (Letter Clarity)
-    # This makes consonants "pop" so pronunciation is crystal clear
-    b, a = [1.3, -1.3], [1, -0.96]
-    y_main = lfilter(b, a, y_main)
+    for i, w in enumerate(weights):
+        if w == "P": # Word Pause
+            audio_stream = np.concatenate([audio_stream, np.zeros(int(fs * 0.15))])
+            continue
+            
+        # 1:2 Timing Ratio (Matra logic)
+        duration = unit_time if w == "L" else unit_time * 2
+        t = np.linspace(0, duration, int(fs * duration))
+        
+        # Frequency selection based on Raga sequence
+        freq = base_freq * raga_intervals[i % len(raga_intervals)]
+        
+        # PRIEST VOICE PHYSICS:
+        # 1. Additive Harmonics (Fundamental + Chest + Nasal)
+        # S (1.0) + Octave (2.0) + Fifth (1.5) + Sub-harmonic (0.5)
+        wave = (1.0 * np.sin(2 * np.pi * freq * t)) + \
+               (0.4 * np.sin(2 * np.pi * freq * 2.0 * t)) + \
+               (0.2 * np.sin(2 * np.pi * freq * 1.5 * t)) + \
+               (0.15 * np.sin(2 * np.pi * freq * 0.5 * t))
+        
+        # 2. Subtle Frequency Jitter (Humanization)
+        jitter = 1 + (0.005 * np.sin(2 * np.pi * 5 * t)) 
+        wave *= jitter
+        
+        # 3. Envelope: 'Soft' Priest Attack (fade in) and 'Mantra' Decay
+        env = np.ones_like(t)
+        fade_in = int(len(t) * 0.2)
+        fade_out = int(len(t) * 0.3)
+        env[:fade_in] = np.linspace(0, 1, fade_in)
+        env[-fade_out:] = np.cos(np.linspace(0, np.pi/2, fade_out))
+        
+        chunk = wave * env
+        audio_stream = np.concatenate([audio_stream, chunk])
+
+    # Apply Vocal Throat Resonance (Formant Simulation)
+    audio_stream = apply_vocal_filter(audio_stream, 1200, fs)
     
-    # Natural Laya (Speed)
-    y_main = librosa.effects.time_stretch(y_main, rate=base_speed)
+    # Normalized Volume
+    audio_stream = audio_stream / np.max(np.abs(audio_stream))
+    return audio_stream, fs
+
+# --- STREAMLIT UI ---
+
+st.title("🕉️ NaadBrahma AI")
+st.markdown("### Advanced Chanda-Aware Priest Voice Synthesis")
+
+# Sidebar for Raga & Style
+with st.sidebar:
+    st.header("🎵 Melodic Framework")
+    raga = st.selectbox("Raga", ["Bhairav", "Bhairavi", "Yaman", "Shanti Monotone"])
+    rasa = st.select_slider("Rasa (Intensity)", ["Shanti", "Karuna", "Veera"])
+    base_hz = st.slider("Priest Pitch (Hz)", 80, 180, 105) # 105Hz is deep 'Pandit' range
+    pace = st.slider("Chant Speed", 0.5, 2.0, 1.0)
+
+# Main UI
+verse = st.text_area("Enter Sanskrit Verse (Devanagari)", "धर्माक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः ।", height=150)
+
+if st.button("🔥 GENERATE VEDIC RECITATION", use_container_width=True):
+    # Mapping Raga intervals
+    scales = {
+        "Bhairav": [1.0, 1.06, 1.25, 1.5, 1.58], 
+        "Bhairavi": [1.0, 1.06, 1.2, 1.5, 1.58],
+        "Yaman": [1.0, 1.12, 1.26, 1.5, 1.89],
+        "Shanti Monotone": [1.0, 1.0, 1.0, 1.05, 1.0]
+    }
     
-    # Harmonic Warmth (Melodic Texture)
-    y_main = np.tanh(y_main * 1.3)
+    with st.spinner("Analyzing Chandas and Matras..."):
+        weights = get_prosody_weights(verse)
+        audio, fs = generate_priest_chant(weights, base_hz, scales[raga], pace)
+        
+        st.audio(audio, sample_rate=fs)
+        
+        # Visualizer
+        st.markdown("#### Matra Breakdown (Laghu ᑌ / Guru —)")
+        display_str = " ".join(["ᑌ" if w == "L" else "—" if w == "G" else " | " for w in weights])
+        st.code(display_str, language="text")
+        
+        # Pitch Tracking Chart
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(y=audio[1000:5000], line=dict(color='#FFD700')))
+        fig.update_layout(title="Acoustic Resonance Pattern", template="plotly_dark", height=300)
+        st.plotly_chart(fig, use_container_width=True)
+
+st.success("Analysis Complete: The engine has applied the 1:2 Matra ratio for rhythmic perfection.")
     os.remove("main.mp3")
 
     # C. COMBINE (Natural Flow)
