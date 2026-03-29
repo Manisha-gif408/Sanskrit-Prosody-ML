@@ -2,6 +2,7 @@ streamlit
 numpy
 plotly
 indic-transliteration
+scipy
 gTTS
 pydub
 audioop-lts
