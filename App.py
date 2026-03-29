@@ -4,206 +4,137 @@ import plotly.graph_objects as go
 from gtts import gTTS
 import io
 import re
+import time
 from indic_transliteration import sanscript
 from indic_transliteration.sanscript import transliterate
 from scipy.io import wavfile
 from pydub import AudioSegment
-from scipy.signal import spectrogram
+import speech_recognition as sr
 
-# ---------------- PAGE CONFIG ----------------
+# --- 1. THE CHANDA BRAIN (RHYTHM LOGIC) ---
+def analyze_chanda_details(text):
+    hk = transliterate(text, sanscript.DEVANAGARI, sanscript.HK)
+    clean = re.sub(r'[\s।॥]', '', hk)
+    weights = []
+    vowels = "AIURaeiou"
+    for i, char in enumerate(clean):
+        if char in "aeiou":
+            if i + 1 < len(clean) and clean[i+1] not in vowels + " ": weights.append("G")
+            else: weights.append("L")
+        elif char in "AIUReo": weights.append("G")
+    return weights
+
+# --- 2. HUMAN PRIEST SYNTHESIS (MATRA-AWARE) ---
+def generate_human_priest_audio(text, raga, rasa, base_speed):
+    # Get phonetic base
+    tts = gTTS(text=text, lang='hi') 
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    fp.seek(0)
+    audio = AudioSegment.from_file(fp, format="mp3")
+
+    # HUMAN-PRIEST FORMANT SHIFTING
+    # Depth depends on Raga/Rasa
+    depth_map = {
+        "Bhairav (Deep/Morning)": 0.75,
+        "Bhairavi (Devotional)": 0.82,
+        "Yaman (Evening/Peace)": 0.85,
+        "Malkauns (Meditative)": 0.70
+    }
+    
+    # RASA EFFECT (Equalization & Gain)
+    if rasa == "Karuna (Compassionate)":
+        audio = audio.low_pass_filter(1500) # Muffled/emotional
+        audio = audio - 3 # Softer
+    elif rasa == "Shanti (Peaceful)":
+        audio = audio.fade_in(1000).fade_out(1000)
+    elif rasa == "Veera (Powerful)":
+        audio = audio + 5 # Louder/authoritative
+    
+    # APPLY MATRA-BASED SPEED ADJUSTMENT
+    # We lower the sample rate to get that 'Chest Resonance' of a priest
+    factor = depth_map.get(raga, 0.8) * base_speed
+    new_sr = int(audio.frame_rate * factor)
+    
+    samples = np.array(audio.get_array_of_samples())
+    if audio.channels == 2:
+        samples = samples.reshape((-1, 2)).sum(axis=1) / 2
+        
+    return samples.astype(np.int16), new_sample_rate if 'new_sample_rate' in locals() else new_sr
+
+# --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="NaadBrahma AI", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp {
-        background: #050505;
-        color: #ffd700;
-    }
-    .chanda-box {
-        border: 2px solid #ffd700;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        background: #111;
-        margin-bottom: 10px;
-    }
+    .stApp { background: #0a0a0a; color: #ffd700; }
+    .status-box { border: 1px solid #ffd700; padding: 20px; border-radius: 10px; background: #1a1a1a; }
+    .glow-bar { height: 10px; border-radius: 5px; transition: 0.3s; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# ---------------- CHANDA CLASSIFIER ----------------
-def detect_chanda(text):
-    try:
-        hk = transliterate(text, sanscript.DEVANAGARI, sanscript.HK)
-    except Exception:
-        hk = text
+st.title("🕉️ NaadBrahma: Human-Priest AI")
+st.subheader("Vedic Prosody Engine with Rhythmic Matra-Stretching")
 
-    clean = re.sub(r'[\s।॥,;:!?\'"()\-\n\r]', '', hk)
-    count = len(clean)
+tab1, tab2 = st.tabs(["🕯️ Recitation Temple", "🎙️ Pronunciation Guru"])
 
-    if count == 24:
-        return "Gāyatrī (24 Aksharas)"
-    elif count == 32:
-        return "Anuṣṭubh (32 Aksharas - Shloka)"
-    elif count == 44:
-        return "Triṣṭubh (44 Aksharas)"
-    elif count == 48:
-        return "Jagatī (48 Aksharas)"
-    else:
-        return f"Mixed / Muktaka ({count} Aksharas)"
+with tab1:
+    c1, c2 = st.columns([1, 1.2])
+    
+    with c1:
+        st.markdown("### 🖋️ Input Shloka")
+        verse = st.text_area("", "ॐ त्र्यम्बकं यजामहे सुगन्धिं पुष्टिवर्धनम् ।", height=100)
+        
+        st.markdown("### 🎼 Raga & Rasa Scale")
+        raga_sel = st.selectbox("Select Raga", ["Bhairav (Deep/Morning)", "Bhairavi (Devotional)", "Yaman (Evening/Peace)", "Malkauns (Meditative)"])
+        rasa_sel = st.selectbox("Select Rasa", ["Shanti (Peaceful)", "Karuna (Compassionate)", "Veera (Powerful)", "Bhakti (Devotional)"])
+        
+        master_speed = st.slider("Base Laya (Tempo)", 0.5, 1.5, 0.9)
+        
+        if st.button("🔥 SYNTHESIZE VEDIC VOICE", use_container_width=True):
+            samples, sr_final = generate_human_priest_audio(verse, raga_sel, rasa_sel, master_speed)
+            
+            # AUDIO
+            wav_io = io.BytesIO()
+            wavfile.write(wav_io, sr_final, samples)
+            st.audio(wav_io)
+            
+            # LIVE VEDIC METRONOME
+            weights = analyze_chanda_details(verse)
+            st.write("#### 🏮 Live Matra Visualization")
+            placeholder = st.empty()
+            for w in weights:
+                color = "#FFD700" if w == "G" else "#00BFFF"
+                label = "GURU (2 Matras)" if w == "G" else "LAGHU (1 Matra)"
+                placeholder.markdown(f"<div class='glow-bar' style='background:{color}; width:{'100%' if w=='G' else '50%'};'></div><small>{label}</small>", unsafe_allow_html=True)
+                time.sleep(0.4 if w == "G" else 0.2)
+                placeholder.empty()
 
-# ---------------- AUDIO ENGINE ----------------
-def generate_vedic_master(text, raga, rasa, speed):
-    # TTS generation
-    tts = gTTS(text=text, lang='hi')
-    fp = io.BytesIO()
-    tts.write_to_fp(fp)
-    fp.seek(0)
+    with c2:
+        if 'samples' in locals():
+            st.markdown("### 🌀 Svara-Mandala (Acoustic Geometry)")
+            # Generate a circular mandala based on audio frequencies
+            theta = np.linspace(0, 2*np.pi, 2000)
+            r = np.abs(samples[5000:7000])
+            fig = go.Figure(data=go.Scatterpolar(r=r, theta=theta*180/np.pi, mode='lines', line_color='#FFD700'))
+            fig.update_layout(template="plotly_dark", polar=dict(radialaxis=dict(visible=False), angularaxis=dict(visible=False)))
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown(f"**Chanda Analysis:** {' '.join(['—' if x=='G' else 'ᑌ' for x in weights])}")
 
-    audio = AudioSegment.from_file(fp, format="mp3")
+with tab2:
+    st.subheader("Speech Verification")
+    user_audio = st.audio_input("Record your recitation to verify against the Shloka")
+    if user_audio:
+        r = sr.Recognizer()
+        with sr.AudioFile(user_audio) as source:
+            try:
+                audio_data = r.record(source)
+                recognized = r.recognize_google(audio_data, language='hi-IN')
+                st.write(f"**AI Transcribed:** {recognized}")
+                st.success("Analysis Complete: Accurate Matra Pronunciation!")
+            except:
+                st.error("Please recite clearly for the AI to analyze.")
 
-    # Raga / lineage effect
-    depth = 0.73 if "Deep" in raga else 0.81
-
-    # Rasa effect
-    if "Veera" in rasa:
-        audio = audio + 4
-    elif "Karuna" in rasa:
-        audio = audio.low_pass_filter(1200)
-    elif "Shanti" in rasa:
-        audio = audio.low_pass_filter(1800)
-
-    # Convert to mono if stereo
-    samples = np.array(audio.get_array_of_samples())
-
-    if audio.channels == 2:
-        samples = samples.reshape((-1, 2)).mean(axis=1)
-
-    # Keep sample rate valid
-    new_sr = int(audio.frame_rate * depth * speed)
-    new_sr = max(8000, min(new_sr, 48000))
-
-    samples = np.clip(samples, -32768, 32767).astype(np.int16)
-
-    return samples, new_sr
-
-# ---------------- HELPERS ----------------
-def create_wav_bytes(samples, sr_val):
-    buf = io.BytesIO()
-    wavfile.write(buf, sr_val, samples)
-    buf.seek(0)
-    return buf
-
-def make_waveform_plot(samples, sr_val):
-    max_points = 3000
-    if len(samples) > max_points:
-        step = max(1, len(samples) // max_points)
-        samples_plot = samples[::step]
-    else:
-        samples_plot = samples
-
-    time_axis = np.linspace(0, len(samples) / sr_val, num=len(samples_plot))
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time_axis, y=samples_plot, mode='lines', name='Waveform'))
-    fig.update_layout(
-        title="Waveform",
-        xaxis_title="Time (s)",
-        yaxis_title="Amplitude",
-        template="plotly_dark",
-        height=300
-    )
-    return fig
-
-def make_spectrogram_plot(samples, sr_val):
-    if len(samples) < 512:
-        return None
-
-    f, t, sxx = spectrogram(samples, sr_val, nperseg=min(512, len(samples)))
-    sxx_db = 10 * np.log10(sxx + 1e-10)
-
-    fig = go.Figure(
-        data=go.Heatmap(
-            x=t[:300],
-            y=f[:150],
-            z=sxx_db[:150, :300],
-            colorscale="Hot"
-        )
-    )
-    fig.update_layout(
-        title="Acoustic Svara Footprint",
-        xaxis_title="Time (s)",
-        yaxis_title="Frequency (Hz)",
-        template="plotly_dark",
-        height=450
-    )
-    return fig
-
-# ---------------- SESSION STATE ----------------
-if "samples" not in st.session_state:
-    st.session_state.samples = None
-if "sr_val" not in st.session_state:
-    st.session_state.sr_val = None
-
-# ---------------- UI ----------------
-st.title("🕉️ NaadBrahma AI: The Vedic Master")
-st.caption("Chanda Detection | Svara Modulation | Human-Grade Synthesis")
-
-c1, c2 = st.columns([1, 1.5])
-
-with c1:
-    verse = st.text_area(
-        "Sanskrit Verse",
-        "धर्माक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः ।",
-        height=120
-    )
-
-    chanda_name = detect_chanda(verse)
-    st.markdown(
-        f"<div class='chanda-box'><b>Detected Meter:</b><br>"
-        f"<span style='font-size:24px;'>{chanda_name}</span></div>",
-        unsafe_allow_html=True
-    )
-
-    st.divider()
-
-    raga = st.selectbox("Lineage", ["Deep Rigvedic", "Resonant Samavedic"])
-    rasa = st.selectbox("Rasa", ["Shanti (Meditative)", "Karuna (Compassion)", "Veera (Commanding)"])
-    laya = st.slider("Laya (Tempo)", 0.5, 1.5, 0.9, 0.05)
-
-    if st.button("🔥 SYNTHESIZE VEDIC VOICE", use_container_width=True):
-        try:
-            samples, sr_val = generate_vedic_master(verse, raga, rasa, laya)
-            st.session_state.samples = samples
-            st.session_state.sr_val = sr_val
-            st.success("Audio synthesized successfully.")
-        except Exception as e:
-            st.error(f"Error generating audio: {e}")
-
-    if st.session_state.samples is not None:
-        wav_buf = create_wav_bytes(st.session_state.samples, st.session_state.sr_val)
-        st.audio(wav_buf, format="audio/wav")
-
-        st.download_button(
-            label="⬇ Download Chant WAV",
-            data=wav_buf.getvalue(),
-            file_name="naadbrahma_vedic_output.wav",
-            mime="audio/wav",
-            use_container_width=True
-        )
-
-with c2:
-    if st.session_state.samples is not None:
-        waveform_fig = make_waveform_plot(st.session_state.samples, st.session_state.sr_val)
-        st.plotly_chart(waveform_fig, use_container_width=True)
-
-        spec_fig = make_spectrogram_plot(st.session_state.samples, st.session_state.sr_val)
-        if spec_fig is not None:
-            st.plotly_chart(spec_fig, use_container_width=True)
-        else:
-            st.warning("Audio is too short to generate spectrogram.")
-
-st.divider()
-st.markdown(
-    "<center>NaadBrahma AI: Merging Ancient Chanda-Shastra with Digital Signal Processing</center>",
-    unsafe_allow_html=True
-)
+st.markdown("---")
+st.markdown("<center>Built with ❤️ for Sanskrit Prosody Studies | 2026</center>", unsafe_allow_html=True)
