@@ -6,3 +6,4 @@ chanda
 scipy
 gTTS
 pydub
+pyaudioop
